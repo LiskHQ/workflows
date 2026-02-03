@@ -18,7 +18,7 @@ jobs:
     if: |
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.event.pull_request.user.login != 'renovate[bot]'
-    uses: lisk/workflows/.github/workflows/claude-pr-summary.yml@main  # Update org/repo name
+    uses: LiskHQ/workflows/.github/workflows/claude-pr-summary.yml@main  # Update org/repo name
     with:
       pr_number: ${{ github.event.pull_request.number }}
       repository: ${{ github.repository }}

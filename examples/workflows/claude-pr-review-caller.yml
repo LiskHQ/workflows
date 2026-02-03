@@ -40,7 +40,7 @@ jobs:
 
   review:
     needs: check-trigger
-    uses: lisk/workflows/.github/workflows/claude-pr-review.yml@main  # Update org/repo name
+    uses: LiskHQ/workflows/.github/workflows/claude-pr-review.yml@main  # Update org/repo name
     with:
       pr_number: ${{ needs.check-trigger.outputs.pr_number }}
       repository: ${{ github.repository }}
