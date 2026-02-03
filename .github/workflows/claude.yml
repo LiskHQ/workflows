@@ -1,0 +1,41 @@
+name: Claude Code Interactive (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      track_progress:
+        description: 'Enable progress tracking'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      claude_code_oauth_token:
+        description: 'Claude Code OAuth token'
+        required: true
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+      checks: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          additional_permissions: |
+            actions: read
+          track_progress: ${{ inputs.track_progress }}
+          use_sticky_comment: true
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh pr edit:*)"'

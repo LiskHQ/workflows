@@ -1,0 +1,47 @@
+# Example: Call the reusable interactive Claude workflow
+# Copy this file to your repo's .github/workflows/ directory
+
+name: Claude Code Interactive
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+# Prevent multiple simultaneous runs
+concurrency:
+  group: claude-interactive-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  check-trigger:
+    # Only run when @claude is mentioned and not by bots
+    if: |
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'renovate[bot]' &&
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.result }}
+    steps:
+      - name: Check conditions
+        id: check
+        run: echo "result=true" >> $GITHUB_OUTPUT
+
+  claude:
+    needs: check-trigger
+    uses: lisk/workflows/.github/workflows/claude.yml@main  # Update org/repo name
+    with:
+      track_progress: true  # Optional: set to false to disable progress updates
+    secrets:
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

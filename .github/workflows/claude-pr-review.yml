@@ -1,0 +1,217 @@
+name: Claude PR Code Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: 'Pull request number'
+        required: true
+        type: string
+      track_progress:
+        description: 'Enable progress tracking'
+        required: false
+        type: boolean
+        default: false
+      repository:
+        description: 'Repository name (owner/repo)'
+        required: true
+        type: string
+    secrets:
+      claude_code_oauth_token:
+        description: 'Claude Code OAuth token'
+        required: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+      actions: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Perform Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          track_progress: ${{ inputs.track_progress }}
+          use_sticky_comment: true
+          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh search:*)"'
+          prompt: |
+            REPO: ${{ inputs.repository }}
+            PR NUMBER: ${{ inputs.pr_number }}
+
+            Your goal: Identify high-impact issues while avoiding nitpicks. Focus on bugs, security, performance, and best practices for this codebase.
+
+            ---
+
+            **ANALYSIS PHASE:**
+
+            **Step 1: Gather PR Information**
+
+            Get PR details:
+            ```bash
+            gh pr view ${{ inputs.pr_number }} --json title,body,files,additions,deletions,labels
+            ```
+
+            Examine code changes:
+            ```bash
+            gh pr diff ${{ inputs.pr_number }}
+            ```
+
+            **Step 2: Review Using Priority System**
+
+            Analyze code with this 3-tier priority framework:
+
+            **Priority 1 (ALWAYS REPORT):**
+            - Bugs and logic errors
+            - Security vulnerabilities (XSS, injection, exposed secrets)
+            - Performance issues (memory leaks, blocking operations, inefficient algorithms)
+            - Crashes or runtime errors
+            - Breaking changes
+
+            **Priority 2 (REPORT IF SIGNIFICANT):**
+            - Type safety issues (excessive `any`, unsafe casts)
+            - Accessibility problems (missing labels, untestable components)
+            - Framework/library misuse
+            - Architecture concerns (tight coupling, violation of separation of concerns)
+
+            **Priority 3 (SKIP UNLESS SEVERE):**
+            - Style/formatting (linters handle this)
+            - Minor refactoring suggestions
+            - Variable naming preferences
+            - Optional optimizations with minimal impact
+
+            **Step 3: Framework-Specific Checks**
+
+            Look for framework/technology-specific issues based on what you find in the codebase (CLAUDE.md, package.json, etc.):
+            - Common performance anti-patterns for the framework
+            - Improper use of framework APIs or conventions
+            - Missing error handling or edge cases
+            - Console logs or debug code left in production code
+            - Platform-specific code without proper guards (if applicable)
+            - Accessibility issues
+
+            **Step 4: Test Coverage Check**
+
+            - Are there tests for new functionality?
+            - Are edge cases tested?
+            - Do changes break existing tests?
+
+            If no tests exist or coverage is insufficient, mention it but don't make it a hard blocker.
+
+            ---
+
+            **REVIEW CRITERIA - EXAMPLES:**
+
+            **✅ Good suggestions (report these):**
+            - "This API call lacks error handling and will crash on network failure"
+            - "Performance issue: This operation runs in O(n²) time - can be optimized to O(n)"
+            - "Missing null check will crash when API returns empty response"
+            - "Hardcoded credentials or API keys exposed in source code"
+            - "Security: User input not sanitized before database query"
+
+            **❌ Bad suggestions (skip these):**
+            - "Consider renaming `data` to `userData` for clarity" (naming nitpick)
+            - "You could extract this into a separate function" (premature abstraction)
+            - "Add comments explaining this logic" (code should be self-explanatory)
+            - "This file is 150 lines, consider splitting" (arbitrary threshold)
+            - "Use optional chaining here" (style preference, not a bug)
+
+            ---
+
+            **OUTPUT FORMAT:**
+
+            **IMPORTANT: Use inline comments for code-specific issues**
+            - Use `mcp__github_inline_comment__create_inline_comment` for issues on specific lines of code
+            - Use `gh pr comment` for general observations or summary
+
+            Post review as a PR comment with this structure:
+
+            ```markdown
+            ## 💡 Code Review
+
+            ### Test Coverage
+            [Brief assessment: Are there tests? Do they cover new functionality? Any gaps?]
+
+            ### Suggestions
+
+            <table><thead><tr><td><strong>Category</strong></td><td align=left><strong>Suggestion</strong></td><td align=center><strong>Severity</strong></td><td align=center><strong>Confidence</strong></td></tr></thead><tbody>
+
+            [For each suggestion:]
+            <tr><td>[Bug/Security/Performance/TypeSafety/Accessibility/BestPractice]</td>
+            <td>
+
+            <details><summary>[One sentence summary]</summary>
+
+            ___
+
+            **Problem:** [What's wrong?]
+
+            **Why it matters:** [Impact/consequence]
+
+            **Proposed fix:** [Specific solution]
+
+            [relevant_file]:[line_start]-[line_end]
+
+            ```diff
+            --- a/[relevant_file]
+            +++ b/[relevant_file]
+            -[existing_code]
+            +[improved_code]
+            ```
+
+            </details></td>
+            <td align=center>[Critical/High/Medium]</td>
+            <td align=center>[Certain/Likely/Possible]</td>
+            </tr>
+
+            </tbody></table>
+            ```
+
+            **If no significant issues found:**
+            ```markdown
+            ✅ **No significant issues found.** The code follows best practices and is production-ready.
+            ```
+
+            ---
+
+            **SEVERITY GUIDE:**
+
+            - **Critical**: Will crash, security vulnerability, data loss, or broken user flow
+            - **High**: Performance degradation, poor UX, or likely bugs under certain conditions
+            - **Medium**: Code quality issues, maintainability concerns, or potential future problems
+
+            **CONFIDENCE LEVELS:**
+
+            - **Certain**: Definite issue based on code analysis
+            - **Likely**: Very probable issue, needs verification
+            - **Possible**: Potential concern, depends on context
+
+            ---
+
+            **IMPORTANT RULES:**
+
+            1. **Skip nitpicks** - Focus on issues that materially impact functionality, performance, or security
+            2. **Be specific** - Include exact file paths, line numbers, and code snippets
+            3. **Provide context** - Explain WHY something is a problem, not just WHAT
+            4. **Include examples** - Show concrete before/after code
+            5. **Check tests** - Always mention test coverage status
+            6. **Repository-aware** - Apply guidelines from CLAUDE.md if it exists
+            7. **No redundancy** - One suggestion per issue, keep explanations under 3 lines
+            8. **Confidence matters** - Don't report uncertain issues as critical
+
+            **DO NOT:**
+            - Update the PR description (only post comments)
+            - Report style issues handled by linters
+            - Suggest refactoring unless code is clearly problematic
+            - Give vague feedback like "consider improving X"
+            - Report hypothetical issues without evidence
