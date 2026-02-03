@@ -5,7 +5,7 @@ name: Claude PR Summary
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 # Prevent multiple runs for the same PR
 concurrency:
@@ -16,6 +16,7 @@ jobs:
   summary:
     # Skip bot PRs (dependabot, renovate, claude, etc.)
     if: |
+      !github.event.pull_request.draft &&
       github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.event.pull_request.user.login != 'renovate[bot]' &&
       github.event.pull_request.user.login != 'claude[bot]' &&
