@@ -14,10 +14,12 @@ concurrency:
 
 jobs:
   summary:
-    # Skip bot PRs (dependabot, renovate, etc.)
+    # Skip bot PRs (dependabot, renovate, claude, etc.)
     if: |
       github.event.pull_request.user.login != 'dependabot[bot]' &&
-      github.event.pull_request.user.login != 'renovate[bot]'
+      github.event.pull_request.user.login != 'renovate[bot]' &&
+      github.event.pull_request.user.login != 'claude[bot]' &&
+      github.event.pull_request.user.login != 'github-actions[bot]'
     uses: LiskHQ/workflows/.github/workflows/claude-pr-summary.yml@main  # Update org/repo name
     with:
       pr_number: ${{ github.event.pull_request.number }}
