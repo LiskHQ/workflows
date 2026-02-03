@@ -33,6 +33,6 @@ jobs:
     needs: check-trigger
     uses: LiskHQ/workflows/.github/workflows/claude.yml@main  # Update org/repo name
     with:
-      track_progress: true  # Optional: set to false to disable progress updates
+      track_progress: false  # Optional: set to false to disable progress updates
     secrets:
       claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
