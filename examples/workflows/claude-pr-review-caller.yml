@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pr_number: ${{ steps.get-pr.outputs.number }}
+      model: ${{ steps.get-model.outputs.model }}
     steps:
       - name: Get PR number
         id: get-pr
@@ -46,6 +47,23 @@ jobs:
             echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Extract model from comment
+        id: get-model
+        run: |
+          COMMENT_BODY="${{ github.event.comment.body }}"
+          MODEL=$(echo "$COMMENT_BODY" | grep -oP '/review\s+\K[a-zA-Z]+' | head -1)
+
+          case "$MODEL" in
+            opus|haiku|sonnet)
+              SELECTED_MODEL="$MODEL"
+              ;;
+            *)
+              SELECTED_MODEL="sonnet"
+              ;;
+          esac
+
+          echo "model=$SELECTED_MODEL" >> $GITHUB_OUTPUT
+
   review:
     needs: check-trigger
     uses: LiskHQ/workflows/.github/workflows/claude-pr-review.yml@main  # Update org/repo name
@@ -53,5 +71,6 @@ jobs:
       pr_number: ${{ needs.check-trigger.outputs.pr_number }}
       repository: ${{ github.repository }}
       track_progress: false  # Optional: set to true to show progress updates
+      model: ${{ needs.check-trigger.outputs.model }}
     secrets:
       claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

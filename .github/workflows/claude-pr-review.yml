@@ -16,6 +16,11 @@ on:
         description: 'Repository name (owner/repo)'
         required: true
         type: string
+      model:
+        description: 'Claude model to use (sonnet, opus, haiku)'
+        required: false
+        type: string
+        default: 'sonnet'
     secrets:
       claude_code_oauth_token:
         description: 'Claude Code OAuth token'
@@ -38,13 +43,29 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Set model identifier
+        id: model-config
+        run: |
+          case "${{ inputs.model }}" in
+            opus)
+              MODEL_ID="opus"
+              ;;
+            haiku)
+              MODEL_ID="haiku"
+              ;;
+            sonnet|*)
+              MODEL_ID="sonnet"
+              ;;
+          esac
+          echo "model_id=$MODEL_ID" >> $GITHUB_OUTPUT
+
       - name: Perform Code Review
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
           track_progress: ${{ inputs.track_progress }}
           use_sticky_comment: true
-          claude_args: '--allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh search:*)"'
+          claude_args: '--model ${{ steps.model-config.outputs.model_id }} --allowed-tools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh search:*)"'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
