@@ -107,40 +107,66 @@ jobs:
 
             **STEP 4: Update PR Description**
 
-            Use a temp file approach to avoid bash heredoc issues:
+            **CRITICAL: DO NOT use temp files or /tmp directory - GitHub Actions runners don't have write access!**
+
+            Construct the body inline and pass directly to gh pr edit:
 
             ```bash
-            # Get current body
-            CURRENT_BODY=$(gh pr view ${{ inputs.pr_number }} --json body --jq '.body')
+            # Get current body (use empty string if null)
+            CURRENT_BODY=$(gh pr view ${{ inputs.pr_number }} --json body --jq '.body // ""')
 
-            # Remove old summary if exists (using perl for reliability)
+            # Remove old summary if exists
             if echo "$CURRENT_BODY" | grep -q "<!-- CLAUDE_SUMMARY_START -->"; then
-              CLEAN_BODY=$(echo "$CURRENT_BODY" | perl -0777 -pe 's/<!-- CLAUDE_SUMMARY_START -->.*?<!-- CLAUDE_SUMMARY_END -->//gs')
+              CLEAN_BODY=$(echo "$CURRENT_BODY" | perl -0777 -pe 's/\n*---\n*<!-- CLAUDE_SUMMARY_START -->.*?<!-- CLAUDE_SUMMARY_END -->//gs')
             else
               CLEAN_BODY="$CURRENT_BODY"
             fi
 
-            # Write new body to temp file
-            cat > /tmp/pr_body.txt << 'EOF'
-            $CLEAN_BODY
+            # Construct the new summary (replace placeholders with actual content)
+            SUMMARY="## 📋 PR Summary
+
+            **Generated:** $(date +%Y-%m-%d)
+
+            ### Overview
+            [Your 2-3 sentence overview here]
+
+            ### Key Changes
+            - [Main change 1]
+            - [Main change 2]
+
+            ### Impact Assessment
+            - **Files Changed**: [number]
+            - **Lines**: +[additions] -[deletions]
+            - **Areas**: [areas based on CLAUDE.md if available]
+            - **Breaking Changes**: [Yes/No]
+
+            ### Technical Assessment
+            - **Complexity**: [Simple/Medium/Complex - brief reason]
+            - **Code Quality**: [Assessment]
+            - **Risk Level**: [Low/Medium/High - brief reason]
+
+            ---
+
+            *For detailed code review, comment \`/review\` on this PR*"
+
+            # Combine clean body with new summary and update PR directly (NO temp files!)
+            gh pr edit ${{ inputs.pr_number }} --body "${CLEAN_BODY}
 
             ---
 
             <!-- CLAUDE_SUMMARY_START -->
-            [Your generated summary here]
-            <!-- CLAUDE_SUMMARY_END -->
-            EOF
-
-            # Update PR with new body
-            gh pr edit ${{ inputs.pr_number }} --body-file /tmp/pr_body.txt
+            ${SUMMARY}
+            <!-- CLAUDE_SUMMARY_END -->"
             ```
 
             **IMPORTANT GUIDELINES:**
 
+            - **NEVER use /tmp or any temp files** - GitHub Actions runners may not have write access
+            - **NEVER use --body-file** - Always use --body with inline content
             - Keep it concise: max 150 words for the entire summary
             - Focus on WHAT changed and WHY, not code review feedback
             - Use context from CLAUDE.md if available
             - Highlight breaking changes prominently
             - Use technical language appropriate for developers
             - No code suggestions - this is informational only
-            - Include call-to-action for detailed review at the end
+            - Escape backticks in the summary with backslashes when constructing the body
