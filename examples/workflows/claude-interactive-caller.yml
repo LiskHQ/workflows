@@ -6,22 +6,33 @@ name: Claude Code Interactive
 on:
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened, assigned]
 
 # Prevent multiple simultaneous runs
 # Include actor in group so bot comments don't cancel user workflows
 concurrency:
-  group: claude-interactive-${{ github.event.issue.number }}-${{ github.actor }}
+  group: claude-interactive-${{ github.event.issue.number || github.event.pull_request.number }}-${{ github.actor }}
   cancel-in-progress: true
 
 jobs:
   check-trigger:
-    # Only run when @claude is mentioned in issue/PR comments and not by bots
+    # Only run when @claude is mentioned and not by bots
     if: |
       github.actor != 'dependabot[bot]' &&
       github.actor != 'renovate[bot]' &&
       github.actor != 'claude[bot]' &&
       github.actor != 'github-actions[bot]' &&
-      contains(github.event.comment.body, '@claude')
+      (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      )
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.result }}
