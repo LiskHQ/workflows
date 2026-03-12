@@ -37,7 +37,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
           track_progress: false
           use_sticky_comment: false
-          claude_args: '--model haiku --allowed-tools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr edit:*)"'
+          claude_args: '--model haiku --allowed-tools "Glob,Read,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr edit:*)"'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
@@ -107,66 +107,42 @@ jobs:
 
             **STEP 4: Update PR Description**
 
-            **CRITICAL: DO NOT use temp files or /tmp directory - GitHub Actions runners don't have write access!**
+            You must update the PR description by making **separate, sequential tool calls** (one command per call).
+            Do NOT combine commands into a single bash script with shell variables.
 
-            Construct the body inline and pass directly to gh pr edit:
-
+            **Step 4a:** Read the current PR body:
             ```bash
-            # Get current body (use empty string if null)
-            CURRENT_BODY=$(gh pr view ${{ inputs.pr_number }} --json body --jq '.body // ""')
+            gh pr view ${{ inputs.pr_number }} --json body --jq '.body // ""'
+            ```
 
-            # Remove old summary if exists
-            if echo "$CURRENT_BODY" | grep -q "<!-- CLAUDE_SUMMARY_START -->"; then
-              CLEAN_BODY=$(echo "$CURRENT_BODY" | perl -0777 -pe 's/\n*---\n*<!-- CLAUDE_SUMMARY_START -->.*?<!-- CLAUDE_SUMMARY_END -->//gs')
-            else
-              CLEAN_BODY="$CURRENT_BODY"
-            fi
+            **Step 4b:** Construct the updated body in your context (no tool call needed):
+            - If the body contains `<!-- CLAUDE_SUMMARY_START -->`, remove everything from `---` before that marker through `<!-- CLAUDE_SUMMARY_END -->` (inclusive)
+            - Append the new summary block to the cleaned body using this structure:
 
-            # Construct the new summary (replace placeholders with actual content)
-            SUMMARY="## 📋 PR Summary
-
-            **Generated:** $(date +%Y-%m-%d)
-
-            ### Overview
-            [Your 2-3 sentence overview here]
-
-            ### Key Changes
-            - [Main change 1]
-            - [Main change 2]
-
-            ### Impact Assessment
-            - **Files Changed**: [number]
-            - **Lines**: +[additions] -[deletions]
-            - **Areas**: [areas based on CLAUDE.md if available]
-            - **Breaking Changes**: [Yes/No]
-
-            ### Technical Assessment
-            - **Complexity**: [Simple/Medium/Complex - brief reason]
-            - **Code Quality**: [Assessment]
-            - **Risk Level**: [Low/Medium/High - brief reason]
-
-            ---
-
-            *For detailed code review, comment \`/review\` on this PR*"
-
-            # Combine clean body with new summary and update PR directly (NO temp files!)
-            gh pr edit ${{ inputs.pr_number }} --body "${CLEAN_BODY}
+            ```
+            [cleaned original body]
 
             ---
 
             <!-- CLAUDE_SUMMARY_START -->
-            ${SUMMARY}
-            <!-- CLAUDE_SUMMARY_END -->"
+            [your generated summary from Step 3]
+            <!-- CLAUDE_SUMMARY_END -->
+            ```
+
+            **Step 4c:** Update the PR with a single `gh pr edit` command. Use single quotes for the --body value
+            to avoid issues with double quotes in the content. Escape any single quotes in the body with '\'' :
+            ```bash
+            gh pr edit ${{ inputs.pr_number }} --body '[full body content here]'
             ```
 
             **IMPORTANT GUIDELINES:**
 
-            - **NEVER use /tmp or any temp files** - GitHub Actions runners may not have write access
-            - **NEVER use --body-file** - Always use --body with inline content
-            - Keep it concise: max 150 words for the entire summary
+            - **Each tool call must be a single command** - no shell variables, pipes, or compound scripts
+            - **NEVER use temp files, --body-file, or /tmp** - pass body content directly via --body
+            - **Use single quotes** for the --body argument to avoid double-quote escaping issues
+            - Keep the summary concise: max 150 words
             - Focus on WHAT changed and WHY, not code review feedback
-            - Use context from CLAUDE.md if available
+            - Use the Glob tool to check if CLAUDE.md exists, then Read it for context
             - Highlight breaking changes prominently
             - Use technical language appropriate for developers
             - No code suggestions - this is informational only
-            - Escape backticks in the summary with backslashes when constructing the body
