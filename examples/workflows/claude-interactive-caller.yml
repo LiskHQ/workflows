@@ -47,4 +47,4 @@ jobs:
     with:
       track_progress: false  # Optional: set to false to disable progress updates
     secrets:
-      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

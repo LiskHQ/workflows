@@ -12,8 +12,8 @@ on:
         required: true
         type: string
     secrets:
-      claude_code_oauth_token:
-        description: 'Claude Code OAuth token'
+      anthropic_api_key:
+        description: 'Claude Code API key'
         required: true
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
       - name: Generate PR Summary
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
           track_progress: false
           use_sticky_comment: false
           claude_args: '--model haiku --allowed-tools "Glob,Read,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr edit:*)"'
