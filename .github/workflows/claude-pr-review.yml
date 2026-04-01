@@ -41,7 +41,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 100
 
       - name: Set model identifier
         id: model-config
@@ -65,7 +65,7 @@ jobs:
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
           track_progress: ${{ inputs.track_progress }}
           use_sticky_comment: true
-          claude_args: '--model ${{ steps.model-config.outputs.model_id }} --allowed-tools "Glob,Read,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh search:*)"'
+          claude_args: '--model ${{ steps.model-config.outputs.model_id }} --allowed-tools "Glob,Grep,Read,Agent,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh search:*),Bash(git diff:*),Bash(git log:*),Bash(git blame:*),Bash(git show:*)"'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
