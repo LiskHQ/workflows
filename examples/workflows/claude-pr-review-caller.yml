@@ -1,5 +1,11 @@
 # Example: Call the reusable PR review workflow
 # Copy this file to your repo's .github/workflows/ directory
+#
+# Supports:
+#   /review          - Standard review (single-agent for <50 lines, multi-agent for larger)
+#   /review opus     - Use opus model
+#   /review haiku    - Use haiku model
+#   needs-review     - Label trigger
 
 name: Claude PR Review
 
