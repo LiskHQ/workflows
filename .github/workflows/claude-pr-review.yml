@@ -242,6 +242,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      id-token: write
     outputs:
       findings: ${{ steps.review.outputs.result }}
     steps:
@@ -307,6 +308,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      id-token: write
     outputs:
       findings: ${{ steps.review.outputs.result }}
     steps:
@@ -372,6 +374,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      id-token: write
     outputs:
       findings: ${{ steps.review.outputs.result }}
     steps:
@@ -436,6 +439,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      id-token: write
     outputs:
       findings: ${{ steps.review.outputs.result }}
     steps:
