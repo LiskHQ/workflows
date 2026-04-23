@@ -31,24 +31,26 @@ git log -p -5 -- <file>  # See recent patches
 
 ## Output Format
 
-Return findings as a JSON array. Each finding:
+Your output is validated against a JSON schema. Return a single JSON object:
 
 ```json
-[
-  {
-    "category": "GitHistory",
-    "file": "path/to/file.ts",
-    "line": 42,
-    "summary": "One sentence description",
-    "evidence": "Historical context — cite the commit hash and message",
-    "severity": "Critical|High|Medium",
-    "confidence": "Certain|Likely|Possible",
-    "fix": "Recommendation (e.g., 'verify with original author' or 'restore the guard')"
-  }
-]
+{
+  "findings": [
+    {
+      "category": "GitHistory",
+      "file": "path/to/file.ts",
+      "line": 42,
+      "summary": "One sentence description",
+      "evidence": "Historical context — cite the commit hash and message",
+      "severity": "Critical|High|Medium",
+      "confidence": "Certain|Likely|Possible",
+      "fix": "Recommendation (e.g., 'verify with original author' or 'restore the guard')"
+    }
+  ]
+}
 ```
 
-If no historically relevant issues found, return `[]`.
+All fields on each finding are required. If no historically relevant issues found, return `{ "findings": [] }`.
 
 ## False Positive Filter — DO NOT FLAG
 

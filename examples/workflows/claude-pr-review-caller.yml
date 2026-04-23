@@ -1,43 +1,50 @@
 # Example: Call the reusable PR review workflow
 # Copy this file to your repo's .github/workflows/ directory
 #
-# Supports:
-#   /review          - Standard review (single-agent for <50 lines, multi-agent for larger)
-#   /review opus     - Use opus model
-#   /review haiku    - Use haiku model
-#   needs-review     - Label trigger
+# Triggers:
+#   Every push to a PR (opened, synchronize, reopened, ready_for_review)
+#   /review          - manual re-run (also lets you pick a model)
+#   /review opus     - manual re-run with opus
+#   /review haiku    - manual re-run with haiku
+#   needs-review     - label trigger (also re-runs)
 
 name: Claude PR Review
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   issue_comment:
     types: [created]
-  pull_request:
-    types: [labeled]
 
-# Prevent multiple runs for the same PR
-# Include actor in group so bot comments don't cancel user workflows
+# Prevent multiple runs for the same PR. cancel-in-progress means a fresh push
+# cancels the in-flight review and starts a new one — avoids reviewing stale SHAs.
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.actor }}
+  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   check-trigger:
-    # Only run if:
-    # 1. Comment is on a PR and contains /review, OR
-    # 2. PR was labeled with needs-review
-    # And not triggered by bots
+    # Run when any of:
+    #   1. PR push/open/ready (non-draft, non-bot)
+    #   2. PR labeled with `needs-review`
+    #   3. PR comment contains `/review`
+    # Always skip bot-authored PRs and bot comments.
     if: |
       github.actor != 'dependabot[bot]' &&
       github.actor != 'renovate[bot]' &&
       github.actor != 'claude[bot]' &&
       github.actor != 'github-actions[bot]' &&
       (
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.draft == false &&
+         (github.event.action == 'opened' ||
+          github.event.action == 'synchronize' ||
+          github.event.action == 'reopened' ||
+          github.event.action == 'ready_for_review' ||
+          (github.event.action == 'labeled' && github.event.label.name == 'needs-review'))) ||
         (github.event_name == 'issue_comment' &&
          github.event.issue.pull_request &&
-         contains(github.event.comment.body, '/review')) ||
-        (github.event_name == 'pull_request' &&
-         github.event.label.name == 'needs-review')
+         contains(github.event.comment.body, '/review'))
       )
     runs-on: ubuntu-latest
     outputs:
@@ -46,28 +53,31 @@ jobs:
     steps:
       - name: Get PR number
         id: get-pr
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [[ "${{ github.event_name }}" == "issue_comment" ]]; then
-            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          if [[ "$EVENT_NAME" == "issue_comment" ]]; then
+            echo "number=$ISSUE_NUMBER" >> $GITHUB_OUTPUT
           else
-            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
           fi
 
-      - name: Extract model from comment
+      - name: Extract model from comment (only for /review trigger)
         id: get-model
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
-          COMMENT_BODY="${{ github.event.comment.body }}"
-          MODEL=$(echo "$COMMENT_BODY" | grep -oP '/review\s+\K[a-zA-Z]+' | head -1)
-
-          case "$MODEL" in
-            opus|haiku|sonnet)
-              SELECTED_MODEL="$MODEL"
-              ;;
-            *)
-              SELECTED_MODEL="sonnet"
-              ;;
-          esac
-
+          SELECTED_MODEL="sonnet"
+          if [[ "$EVENT_NAME" == "issue_comment" ]]; then
+            MODEL=$(echo "$COMMENT_BODY" | grep -oiP '/review\s+\K[a-zA-Z]+' | head -1 || true)
+            MODEL=$(echo "$MODEL" | tr '[:upper:]' '[:lower:]')
+            case "$MODEL" in
+              opus|haiku|sonnet) SELECTED_MODEL="$MODEL" ;;
+            esac
+          fi
           echo "model=$SELECTED_MODEL" >> $GITHUB_OUTPUT
 
   review:
@@ -76,7 +86,7 @@ jobs:
     with:
       pr_number: ${{ needs.check-trigger.outputs.pr_number }}
       repository: ${{ github.repository }}
-      track_progress: false  # Optional: set to true to show progress updates
+      track_progress: false
       model: ${{ needs.check-trigger.outputs.model }}
     secrets:
       anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}

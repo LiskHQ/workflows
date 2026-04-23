@@ -37,24 +37,26 @@ You ONLY review these categories. Skip everything else.
 
 ## Output Format
 
-Return findings as a JSON array. Each finding:
+Your output is validated against a JSON schema. Return a single JSON object:
 
 ```json
-[
-  {
-    "category": "Correctness|EdgeCase|ErrorHandling|Tests",
-    "file": "path/to/file.ts",
-    "line": 42,
-    "summary": "One sentence description",
-    "evidence": "Concrete evidence from the code",
-    "severity": "Critical|High|Medium",
-    "confidence": "Certain|Likely|Possible",
-    "fix": "Proposed fix with code snippet"
-  }
-]
+{
+  "findings": [
+    {
+      "category": "Correctness|EdgeCase|ErrorHandling|Tests",
+      "file": "path/to/file.ts",
+      "line": 42,
+      "summary": "One sentence description",
+      "evidence": "Concrete evidence from the code",
+      "severity": "Critical|High|Medium",
+      "confidence": "Certain|Likely|Possible",
+      "fix": "Proposed fix with code snippet"
+    }
+  ]
+}
 ```
 
-If no issues found, return `[]`.
+All fields on each finding are required. If no issues found, return `{ "findings": [] }`.
 
 ## False Positive Filter — DO NOT FLAG
 

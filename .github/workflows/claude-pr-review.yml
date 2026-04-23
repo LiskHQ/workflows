@@ -40,6 +40,7 @@ jobs:
       total_lines: ${{ steps.diff-size.outputs.total_lines }}
       review_mode: ${{ steps.diff-size.outputs.review_mode }}
       model_id: ${{ steps.model-config.outputs.model_id }}
+      findings_schema: ${{ steps.schema.outputs.findings_schema }}
     steps:
       - name: Set model identifier
         id: model-config
@@ -50,6 +51,39 @@ jobs:
             sonnet|*) MODEL_ID="sonnet" ;;
           esac
           echo "model_id=$MODEL_ID" >> $GITHUB_OUTPUT
+
+      - name: Build findings JSON schema
+        id: schema
+        run: |
+          # Canonical schema shared by all review agents. Keep in sync with
+          # .github/review-agents/*.md output contracts.
+          SCHEMA=$(jq -c . <<'JSON'
+          {
+            "type": "object",
+            "properties": {
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "category": { "type": "string" },
+                    "file": { "type": "string" },
+                    "line": { "type": "integer" },
+                    "summary": { "type": "string" },
+                    "evidence": { "type": "string" },
+                    "severity": { "type": "string", "enum": ["Critical", "High", "Medium"] },
+                    "confidence": { "type": "string", "enum": ["Certain", "Likely", "Possible"] },
+                    "fix": { "type": "string" }
+                  },
+                  "required": ["category", "file", "line", "summary", "evidence", "severity", "confidence", "fix"]
+                }
+              }
+            },
+            "required": ["findings"]
+          }
+          JSON
+          )
+          echo "findings_schema=$SCHEMA" >> "$GITHUB_OUTPUT"
 
       - name: Compute diff size
         id: diff-size
@@ -244,7 +278,7 @@ jobs:
       pull-requests: read
       id-token: write
     outputs:
-      findings: ${{ steps.review.outputs.result }}
+      findings: ${{ steps.review.outputs.structured_output }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -273,7 +307,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
-          claude_args: '--model ${{ needs.prepare.outputs.model_id }} --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"'
+          claude_args: |
+            --model ${{ needs.prepare.outputs.model_id }}
+            --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --json-schema '${{ needs.prepare.outputs.findings_schema }}'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
@@ -297,9 +334,21 @@ jobs:
 
             3. Read the full content of each changed file (not just the diff).
 
-            4. Apply your review criteria and return findings as JSON.
+            4. Apply your review criteria.
 
-            **IMPORTANT**: Your entire response must be a valid JSON array of findings. No other text.
+            Your final answer must be a JSON object matching the schema: `{ "findings": [ ... ] }`. If no issues, return `{ "findings": [] }`.
+
+      - name: Log findings count
+        if: always()
+        env:
+          OUT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$OUT" ]; then
+            echo "correctness: no structured_output (agent failed or schema rejected)"
+          else
+            COUNT=$(printf '%s' "$OUT" | jq -r '.findings | length')
+            echo "correctness findings: $COUNT"
+          fi
 
   review-consistency:
     needs: prepare
@@ -310,7 +359,7 @@ jobs:
       pull-requests: read
       id-token: write
     outputs:
-      findings: ${{ steps.review.outputs.result }}
+      findings: ${{ steps.review.outputs.structured_output }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -339,7 +388,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
-          claude_args: '--model ${{ needs.prepare.outputs.model_id }} --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"'
+          claude_args: |
+            --model ${{ needs.prepare.outputs.model_id }}
+            --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --json-schema '${{ needs.prepare.outputs.findings_schema }}'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
@@ -363,9 +415,21 @@ jobs:
 
             3. Read the full content of each changed file.
             4. Read all CLAUDE.md files in the repo for project conventions.
-            5. Apply your review criteria and return findings as JSON.
+            5. Apply your review criteria.
 
-            **IMPORTANT**: Your entire response must be a valid JSON array of findings. No other text.
+            Your final answer must be a JSON object matching the schema: `{ "findings": [ ... ] }`. If no issues, return `{ "findings": [] }`.
+
+      - name: Log findings count
+        if: always()
+        env:
+          OUT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$OUT" ]; then
+            echo "consistency: no structured_output (agent failed or schema rejected)"
+          else
+            COUNT=$(printf '%s' "$OUT" | jq -r '.findings | length')
+            echo "consistency findings: $COUNT"
+          fi
 
   review-security-design:
     needs: prepare
@@ -376,7 +440,7 @@ jobs:
       pull-requests: read
       id-token: write
     outputs:
-      findings: ${{ steps.review.outputs.result }}
+      findings: ${{ steps.review.outputs.structured_output }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -405,7 +469,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
-          claude_args: '--model ${{ needs.prepare.outputs.model_id }} --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"'
+          claude_args: |
+            --model ${{ needs.prepare.outputs.model_id }}
+            --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*)"
+            --json-schema '${{ needs.prepare.outputs.findings_schema }}'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
@@ -428,9 +495,21 @@ jobs:
             ```
 
             3. Read the full content of each changed file.
-            4. Apply your review criteria and return findings as JSON.
+            4. Apply your review criteria.
 
-            **IMPORTANT**: Your entire response must be a valid JSON array of findings. No other text.
+            Your final answer must be a JSON object matching the schema: `{ "findings": [ ... ] }`. If no issues, return `{ "findings": [] }`.
+
+      - name: Log findings count
+        if: always()
+        env:
+          OUT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$OUT" ]; then
+            echo "security-design: no structured_output (agent failed or schema rejected)"
+          else
+            COUNT=$(printf '%s' "$OUT" | jq -r '.findings | length')
+            echo "security-design findings: $COUNT"
+          fi
 
   review-git-history:
     needs: prepare
@@ -441,7 +520,7 @@ jobs:
       pull-requests: read
       id-token: write
     outputs:
-      findings: ${{ steps.review.outputs.result }}
+      findings: ${{ steps.review.outputs.structured_output }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -470,7 +549,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.anthropic_api_key }}
-          claude_args: '--model ${{ needs.prepare.outputs.model_id }} --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git log:*),Bash(git blame:*)"'
+          claude_args: |
+            --model ${{ needs.prepare.outputs.model_id }}
+            --allowed-tools "Glob,Read,Grep,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(git log:*),Bash(git blame:*)"
+            --json-schema '${{ needs.prepare.outputs.findings_schema }}'
           prompt: |
             REPO: ${{ inputs.repository }}
             PR NUMBER: ${{ inputs.pr_number }}
@@ -494,9 +576,21 @@ jobs:
 
             3. For each changed file, run git log and git blame on the modified sections.
 
-            4. Apply your review criteria and return findings as JSON.
+            4. Apply your review criteria.
 
-            **IMPORTANT**: Your entire response must be a valid JSON array of findings. No other text.
+            Your final answer must be a JSON object matching the schema: `{ "findings": [ ... ] }`. If no historically relevant issues, return `{ "findings": [] }`.
+
+      - name: Log findings count
+        if: always()
+        env:
+          OUT: ${{ steps.review.outputs.structured_output }}
+        run: |
+          if [ -z "$OUT" ]; then
+            echo "git-history: no structured_output (agent failed or schema rejected)"
+          else
+            COUNT=$(printf '%s' "$OUT" | jq -r '.findings | length')
+            echo "git-history findings: $COUNT"
+          fi
 
   # ──────────────────────────────────────────────
   # Step 3: Aggregate findings from all agents
@@ -560,22 +654,22 @@ jobs:
 
             ### Correctness Agent
             ```json
-            ${{ needs.review-correctness.outputs.findings || '[]' }}
+            ${{ needs.review-correctness.outputs.findings || '{"findings":[]}'}}
             ```
 
             ### Consistency Agent
             ```json
-            ${{ needs.review-consistency.outputs.findings || '[]' }}
+            ${{ needs.review-consistency.outputs.findings || '{"findings":[]}'}}
             ```
 
             ### Security & Design Agent
             ```json
-            ${{ needs.review-security-design.outputs.findings || '[]' }}
+            ${{ needs.review-security-design.outputs.findings || '{"findings":[]}'}}
             ```
 
             ### Git History Agent
             ```json
-            ${{ needs.review-git-history.outputs.findings || '[]' }}
+            ${{ needs.review-git-history.outputs.findings || '{"findings":[]}'}}
             ```
 
             ## Your Task

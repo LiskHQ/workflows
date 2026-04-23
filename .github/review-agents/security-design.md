@@ -34,24 +34,26 @@ Only flag when impact is **measurable or collection is unbounded**.
 
 ## Output Format
 
-Return findings as a JSON array. Each finding:
+Your output is validated against a JSON schema. Return a single JSON object:
 
 ```json
-[
-  {
-    "category": "Security|Design|Performance",
-    "file": "path/to/file.ts",
-    "line": 42,
-    "summary": "One sentence description",
-    "evidence": "Concrete evidence from the code",
-    "severity": "Critical|High|Medium",
-    "confidence": "Certain|Likely|Possible",
-    "fix": "Proposed fix with code snippet"
-  }
-]
+{
+  "findings": [
+    {
+      "category": "Security|Design|Performance",
+      "file": "path/to/file.ts",
+      "line": 42,
+      "summary": "One sentence description",
+      "evidence": "Concrete evidence from the code",
+      "severity": "Critical|High|Medium",
+      "confidence": "Certain|Likely|Possible",
+      "fix": "Proposed fix with code snippet"
+    }
+  ]
+}
 ```
 
-If no issues found, return `[]`.
+All fields on each finding are required. If no issues found, return `{ "findings": [] }`.
 
 ## False Positive Filter — DO NOT FLAG
 

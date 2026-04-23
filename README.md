@@ -13,7 +13,7 @@ Reusable GitHub Actions workflows for Claude Code reviews. Each repo defines its
 
 ### 1. PR Review
 - **File**: `claude-pr-review.yml`
-- **Trigger**: Comment `/review` or add `needs-review` label
+- **Trigger**: Auto-runs on every PR push (open, synchronize, reopen, ready_for_review). Manual re-runs via `/review` comment or `needs-review` label; skips draft PRs and bot actors.
 - **Does**: Structured code review with inline comments, severity levels, focuses on bugs/security/performance
 - **Example**: See `examples/workflows/claude-pr-review-caller.yml`
 
