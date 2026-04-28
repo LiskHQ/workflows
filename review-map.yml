@@ -1,0 +1,90 @@
+# review-map.yml
+# Source of truth for cross-domain PR review routing.
+# Edits via PR. For employment data, see HR system.
+#
+# How it's read: the auto-assign-reviewer reusable workflow sparse-checks-out
+# this file and resolves a reviewer using the cascade documented in
+# docs/auto-reviewer.md.
+
+# Master kill switch. Set to false to disable all assignment immediately.
+enabled: true
+
+# Per-repo enablement. Remove a repo to pause assignment there.
+enabled_repos:
+  - lisk-backend
+  - lisk-web
+  - lisk-infra
+  - lisk-mobile
+  - lisk-contracts
+
+# Authors to skip entirely (no assignment, exit 0).
+bot_authors:
+  - dependabot[bot]
+  - renovate[bot]
+  - github-actions[bot]
+  - claude[bot]
+  - copilot-pull-request-reviewer[bot]
+  - bmijac  # external contributor on lisk-web
+
+# Domain equivalence — within a squad, specialists for an equivalent domain
+# may review when no specialist exists for the requested domain. This stays
+# the review inside the squad. Equivalence does NOT apply to sibling cascade
+# (cross-squad routing always uses the actual domain).
+domain_equivalence:
+  web: [mobile]
+  mobile: [web]
+
+# When own-squad has no eligible specialist (and no equivalent), walk
+# siblings in this order.
+sibling_fallback_order:
+  - money
+  - org
+  - platform
+  - global
+
+squads:
+  platform:
+    tl: ishantiw
+    members:
+      - Nazgolze
+      - ishantiw
+      - sameersubudhi
+    specialists:
+      backend: [sameersubudhi, ishantiw]
+      infra:   [Nazgolze]
+    # Domains where, if no specialist is eligible, the cascade falls back to
+    # any other squad member (instead of jumping straight to siblings).
+    fallback_to_squad_members_for: [infra]
+
+  money:
+    tl: 5heri
+    members:
+      - oskarleonard
+      - Balanced02
+      - eniolam1000752
+      - vardan10
+      - 5heri
+    specialists:
+      backend: [vardan10]
+      mobile:  [oskarleonard, Balanced02, eniolam1000752, 5heri]
+
+  org:
+    tl: mmarinovic
+    members:
+      - mmarinovic
+      - mvuco00
+      - ikem-legend
+      - matjazv
+      - mislavtomic
+    specialists:
+      backend:   [matjazv]
+      web:       [mmarinovic, mvuco00, ikem-legend, mislavtomic]
+      contracts: [matjazv]
+
+  global:
+    tl: null
+    members:
+      - shuse2
+      - ricott1
+    specialists:
+      contracts: [ricott1]

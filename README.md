@@ -29,6 +29,14 @@ Reusable GitHub Actions workflows for Claude Code reviews. Each repo defines its
 - **Does**: Flexible assistant - explain code, investigate bugs, write docs, answer questions
 - **Example**: See `examples/workflows/claude-interactive-caller.yml`
 
+### 4. Auto-assign Reviewer
+- **File**: `auto-assign-reviewer.yml`
+- **Trigger**: PR `opened` or `ready_for_review` (skips drafts, bots, and authors not in any squad)
+- **Does**: Picks a reviewer using `review-map.yml` (squad × domain matrix with sibling cascade) and requests review via the GitHub API. Soft-fails — never blocks merges.
+- **Config**: [`review-map.yml`](./review-map.yml) at repo root
+- **Docs**: [`docs/auto-reviewer.md`](./docs/auto-reviewer.md)
+- **Example**: See `examples/workflows/auto-assign-reviewer-caller.yml`
+
 ## CLAUDE.md (Optional)
 
 Create in repo root to define review priorities:

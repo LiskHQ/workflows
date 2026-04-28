@@ -1,0 +1,172 @@
+name: Validate review-map.yml
+
+# Lints review-map.yml on PRs that touch it. Verifies:
+#   - YAML is valid
+#   - Required top-level fields exist
+#   - Every github_login referenced is a real LiskHQ org member
+#   - Every domain key in specialists is one of: backend|web|infra|mobile|contracts
+#   - Every squad name in sibling_fallback_order exists under .squads
+#   - Each squad's TL is also in members (when not null)
+
+on:
+  pull_request:
+    paths:
+      - review-map.yml
+      - .github/workflows/validate-review-map.yml
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yq and convert map to JSON
+        run: |
+          set -euo pipefail
+          if ! command -v yq >/dev/null 2>&1; then
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
+          yq --version
+          yq -o=json '.' review-map.yml > /tmp/review-map.json
+          jq -e . /tmp/review-map.json >/dev/null
+          echo "review-map.json built ($(wc -c < /tmp/review-map.json) bytes)"
+
+      - name: Validate structure
+        env:
+          MAP_JSON: /tmp/review-map.json
+        run: |
+          set -euo pipefail
+          fail=0
+          err() { echo "::error file=review-map.yml::$*"; fail=1; }
+
+          # Top-level fields
+          for f in enabled enabled_repos bot_authors sibling_fallback_order squads; do
+            if [ "$(jq -r --arg f "$f" '. | has($f)' "$MAP_JSON")" != "true" ]; then
+              err "missing required top-level field: $f"
+            fi
+          done
+
+          # Domain keys must be from the allowed set
+          ALLOWED_DOMAINS="backend web infra mobile contracts"
+          while read -r d; do
+            [ -z "$d" ] && continue
+            case " $ALLOWED_DOMAINS " in
+              *" $d "*) ;;
+              *) err "unknown domain key in specialists: '$d' (allowed: $ALLOWED_DOMAINS)" ;;
+            esac
+          done < <(jq -r '[.squads[].specialists | keys[]] | unique | .[]' "$MAP_JSON")
+
+          # sibling_fallback_order must reference existing squads
+          SQUADS=$(jq -r '.squads | keys[]' "$MAP_JSON")
+          while read -r s; do
+            [ -z "$s" ] && continue
+            if ! printf '%s\n' "$SQUADS" | grep -Fxq "$s"; then
+              err "sibling_fallback_order references unknown squad: '$s'"
+            fi
+          done < <(jq -r '.sibling_fallback_order[]' "$MAP_JSON")
+
+          # Every squad in .squads should be in sibling_fallback_order (and vice versa).
+          ORDER=$(jq -r '.sibling_fallback_order[]' "$MAP_JSON")
+          while read -r s; do
+            [ -z "$s" ] && continue
+            if ! printf '%s\n' "$ORDER" | grep -Fxq "$s"; then
+              err "squad '$s' missing from sibling_fallback_order"
+            fi
+          done <<<"$SQUADS"
+
+          # TL (when non-null) must appear in members
+          while IFS=$'\t' read -r squad tl; do
+            [ "$tl" = "null" ] || [ -z "$tl" ] && continue
+            if ! jq -r --arg s "$squad" '.squads[$s].members[]' "$MAP_JSON" | grep -Fxq "$tl"; then
+              err "squad '$squad' TL '$tl' is not in its members list"
+            fi
+          done < <(jq -r '.squads | to_entries[] | [.key, (.value.tl // "")] | @tsv' "$MAP_JSON")
+
+          # fallback_to_squad_members_for entries must be valid domains
+          while IFS=$'\t' read -r squad domain; do
+            [ -z "$domain" ] && continue
+            case " $ALLOWED_DOMAINS " in
+              *" $domain "*) ;;
+              *) err "squad '$squad' fallback_to_squad_members_for contains unknown domain: '$domain'" ;;
+            esac
+          done < <(jq -r '.squads | to_entries[] | .key as $s | (.value.fallback_to_squad_members_for // [])[] | [$s, .] | @tsv' "$MAP_JSON")
+
+          # domain_equivalence keys and values must all be valid domains
+          while IFS=$'\t' read -r k v; do
+            [ -z "$k" ] && continue
+            for d in "$k" "$v"; do
+              case " $ALLOWED_DOMAINS " in
+                *" $d "*) ;;
+                *) err "domain_equivalence references unknown domain: '$d'" ;;
+              esac
+            done
+          done < <(jq -r '
+            (.domain_equivalence // {}) | to_entries[]
+            | .key as $k | .value[] | [$k, .] | @tsv' "$MAP_JSON")
+
+          # Every specialist login should also appear in the squad's members list
+          while IFS=$'\t' read -r squad login; do
+            [ -z "$login" ] && continue
+            if ! jq -r --arg s "$squad" '.squads[$s].members[]' "$MAP_JSON" | grep -Fxq "$login"; then
+              err "squad '$squad' specialist '$login' is not in its members list"
+            fi
+          done < <(jq -r '
+            .squads | to_entries[] | .key as $s
+            | (.value.specialists // {} | to_entries[] | .value[]) as $login
+            | [$s, $login] | @tsv' "$MAP_JSON")
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "structure: OK"
+
+      - name: Verify all logins are real GitHub users
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAP_JSON: /tmp/review-map.json
+        run: |
+          set -euo pipefail
+
+          # Catches typos (non-existent logins). Does NOT enforce org
+          # membership — that requires a PAT with read:org scope, which
+          # GITHUB_TOKEN does not have. If a non-collaborator is listed,
+          # the auto-assign workflow will soft-fail with a PR comment at
+          # request time rather than blocking the map PR here.
+
+          LOGINS=$(
+            jq -r '
+              [
+                (.bot_authors // [])[],
+                (.squads[].members // [])[],
+                (.squads[].tl // empty),
+                (.squads[].specialists // {} | to_entries[].value[])
+              ] | unique | .[]' "$MAP_JSON"
+          )
+
+          # Bots and external collaborators in bot_authors are exempt — they
+          # may not have stable user pages or may be auto-generated.
+          EXEMPT=$(jq -r '.bot_authors[]' "$MAP_JSON" | sort -u)
+
+          fail=0
+          while read -r login; do
+            [ -z "$login" ] && continue
+            case "$login" in
+              *"[bot]") continue ;;
+            esac
+            if printf '%s\n' "$EXEMPT" | grep -Fxq "$login"; then
+              continue
+            fi
+            if ! gh api "/users/$login" --silent 2>/dev/null; then
+              echo "::error file=review-map.yml::login '$login' is not a real GitHub user (typo?)"
+              fail=1
+            fi
+          done <<<"$LOGINS"
+
+          if [ "$fail" -ne 0 ]; then
+            exit 1
+          fi
+          echo "logins: OK"

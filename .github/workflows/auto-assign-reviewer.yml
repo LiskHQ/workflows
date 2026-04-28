@@ -1,0 +1,222 @@
+name: Auto-assign Reviewer (Reusable)
+
+# Resolves a reviewer for the PR using review-map.yml from LiskHQ/workflows
+# and requests them via the GitHub API. Soft-fails on any error so it never
+# blocks merges.
+#
+# Cascade (see docs/auto-reviewer.md):
+#   1. own-squad specialists for the domain (round-robin via PR# % N)
+#   2. own-squad specialists for an equivalent domain (web ↔ mobile)
+#   3. for fallback_to_squad_members_for domains: any other squad member
+#   4. sibling squads in sibling_fallback_order (actual domain only)
+#   5. soft-fail with PR comment
+
+on:
+  workflow_call:
+    inputs:
+      domain:
+        description: 'Domain of this repo (backend|web|infra|mobile|contracts)'
+        required: true
+        type: string
+      map_ref:
+        description: 'Git ref of LiskHQ/workflows to source review-map.yml from'
+        required: false
+        type: string
+        default: main
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Validate domain input
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          case "$DOMAIN" in
+            backend|web|infra|mobile|contracts) ;;
+            *) echo "::error::Invalid domain '$DOMAIN'. Must be one of: backend, web, infra, mobile, contracts"; exit 1 ;;
+          esac
+
+      - name: Sparse-checkout review-map.yml
+        uses: actions/checkout@v4
+        with:
+          repository: LiskHQ/workflows
+          ref: ${{ inputs.map_ref }}
+          path: .workflow-repo
+          sparse-checkout: review-map.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Install yq and convert map to JSON
+        env:
+          MAP_FILE: .workflow-repo/review-map.yml
+        run: |
+          set -euo pipefail
+          if ! command -v yq >/dev/null 2>&1; then
+            sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            sudo chmod +x /usr/local/bin/yq
+          fi
+          yq --version
+          # Convert YAML → JSON once. All subsequent logic uses jq with --arg.
+          yq -o=json '.' "$MAP_FILE" > /tmp/review-map.json
+          jq -e . /tmp/review-map.json >/dev/null
+          echo "review-map.json built ($(wc -c < /tmp/review-map.json) bytes)"
+
+      - name: Resolve and request reviewer
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAP_JSON: /tmp/review-map.json
+          DOMAIN: ${{ inputs.domain }}
+          REPO: ${{ github.repository }}
+          REPO_NAME: ${{ github.event.repository.name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+
+          log() { echo "::notice::$*"; }
+          warn() { echo "::warning::$*"; }
+          comment() {
+            # Best-effort PR comment; never fail the job if comment posting fails.
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$1" || true
+          }
+
+          # ── Map-level checks ─────────────────────────────────────────────
+          ENABLED=$(jq -r '.enabled' "$MAP_JSON")
+          if [ "$ENABLED" != "true" ]; then
+            log "auto-reviewer: disabled via review-map.yml (enabled=$ENABLED). Exiting."
+            exit 0
+          fi
+
+          if ! jq -r '.enabled_repos[]' "$MAP_JSON" | grep -Fxq "$REPO_NAME"; then
+            log "auto-reviewer: $REPO_NAME not in enabled_repos. Exiting."
+            exit 0
+          fi
+
+          # ── Bot-author skip ──────────────────────────────────────────────
+          if jq -r '.bot_authors[]' "$MAP_JSON" | grep -Fxq "$PR_AUTHOR"; then
+            log "auto-reviewer: skipping bot/external author '$PR_AUTHOR'."
+            exit 0
+          fi
+
+          # ── Find author's squad ──────────────────────────────────────────
+          AUTHOR_SQUAD=$(jq -r --arg a "$PR_AUTHOR" '
+            .squads | to_entries[]
+            | select(.value.members | index($a))
+            | .key' "$MAP_JSON" | head -n1)
+
+          if [ -z "$AUTHOR_SQUAD" ] || [ "$AUTHOR_SQUAD" = "null" ]; then
+            log "auto-reviewer: author '$PR_AUTHOR' not in any squad. Skipping."
+            exit 0
+          fi
+
+          log "auto-reviewer: author=$PR_AUTHOR squad=$AUTHOR_SQUAD domain=$DOMAIN repo=$REPO_NAME pr=$PR_NUMBER"
+
+          # ── Already-requested reviewers (idempotency) ────────────────────
+          EXISTING=$(gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" --jq '.users[].login' 2>/dev/null || true)
+
+          # ── Cascade resolution ───────────────────────────────────────────
+          SELECTED=""
+          REASON=""
+
+          # Step 1: own-squad specialists for this domain
+          OWN_LIST=$(jq -r --arg s "$AUTHOR_SQUAD" --arg d "$DOMAIN" '
+            .squads[$s].specialists[$d] // [] | .[]' "$MAP_JSON")
+          if [ -n "$OWN_LIST" ]; then
+            CAND=$(printf '%s\n' "$OWN_LIST" | grep -v -Fx "$PR_AUTHOR" || true)
+            if [ -n "$CAND" ]; then
+              COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
+              IDX=$(( PR_NUMBER % COUNT ))
+              SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
+              REASON="own-squad ($AUTHOR_SQUAD) $DOMAIN specialist (round-robin ${IDX}/${COUNT})"
+            fi
+          fi
+
+          # Step 2: own-squad equivalent-domain specialists
+          # E.g., for org's mobile PR, try org's web specialists since web ↔
+          # mobile are equivalent. Keeps the review inside the squad.
+          if [ -z "$SELECTED" ]; then
+            EQUIV_DOMAINS=$(jq -r --arg d "$DOMAIN" '
+              .domain_equivalence[$d] // [] | .[]' "$MAP_JSON")
+            for EQ in $EQUIV_DOMAINS; do
+              EQ_LIST=$(jq -r --arg s "$AUTHOR_SQUAD" --arg d "$EQ" '
+                .squads[$s].specialists[$d] // [] | .[]' "$MAP_JSON")
+              [ -z "$EQ_LIST" ] && continue
+              CAND=$(printf '%s\n' "$EQ_LIST" | grep -v -Fx "$PR_AUTHOR" || true)
+              if [ -n "$CAND" ]; then
+                COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
+                IDX=$(( PR_NUMBER % COUNT ))
+                SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
+                REASON="own-squad ($AUTHOR_SQUAD) $EQ specialist (equivalent to $DOMAIN)"
+                break
+              fi
+            done
+          fi
+
+          # Step 3: squad-wide fallback for designated domains (e.g., infra)
+          if [ -z "$SELECTED" ]; then
+            FB=$(jq -r --arg s "$AUTHOR_SQUAD" '
+              .squads[$s].fallback_to_squad_members_for // [] | .[]' "$MAP_JSON")
+            if printf '%s\n' "$FB" | grep -Fxq "$DOMAIN"; then
+              SQUAD_MEMBERS=$(jq -r --arg s "$AUTHOR_SQUAD" '.squads[$s].members[]' "$MAP_JSON")
+              CAND=$(printf '%s\n' "$SQUAD_MEMBERS" | grep -v -Fx "$PR_AUTHOR" || true)
+              if [ -n "$CAND" ]; then
+                COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
+                IDX=$(( PR_NUMBER % COUNT ))
+                SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
+                REASON="own-squad ($AUTHOR_SQUAD) member fallback for $DOMAIN"
+              fi
+            fi
+          fi
+
+          # Step 4: sibling cascade
+          if [ -z "$SELECTED" ]; then
+            ORDER=$(jq -r '.sibling_fallback_order[]' "$MAP_JSON")
+            for SIB in $ORDER; do
+              if [ "$SIB" = "$AUTHOR_SQUAD" ]; then
+                continue
+              fi
+              SIB_LIST=$(jq -r --arg s "$SIB" --arg d "$DOMAIN" '
+                .squads[$s].specialists[$d] // [] | .[]' "$MAP_JSON")
+              if [ -z "$SIB_LIST" ]; then
+                continue
+              fi
+              CAND=$(printf '%s\n' "$SIB_LIST" | grep -v -Fx "$PR_AUTHOR" || true)
+              if [ -n "$CAND" ]; then
+                COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
+                IDX=$(( PR_NUMBER % COUNT ))
+                SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
+                REASON="sibling-squad ($SIB) $DOMAIN specialist"
+                break
+              fi
+            done
+          fi
+
+          # Step 5: soft-fail
+          if [ -z "$SELECTED" ]; then
+            warn "auto-reviewer: no eligible reviewer found for $PR_AUTHOR / $DOMAIN."
+            comment "🤖 **Auto-reviewer:** could not find an eligible reviewer for domain \`$DOMAIN\` from author \`$PR_AUTHOR\` (squad \`$AUTHOR_SQUAD\`). Please assign a reviewer manually."
+            exit 0
+          fi
+
+          # ── Idempotency check ────────────────────────────────────────────
+          if printf '%s\n' "$EXISTING" | grep -Fxq "$SELECTED"; then
+            log "auto-reviewer: $SELECTED already requested on PR #$PR_NUMBER. Skipping."
+            exit 0
+          fi
+
+          # ── Request the reviewer ─────────────────────────────────────────
+          log "auto-reviewer: requesting $SELECTED ($REASON)"
+          if ! gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
+                -f "reviewers[]=$SELECTED" >/dev/null 2>err.log; then
+            ERR=$(cat err.log || true)
+            warn "auto-reviewer: failed to request $SELECTED: $ERR"
+            comment "🤖 **Auto-reviewer:** tried to request review from \`@$SELECTED\` but the API rejected it (likely not a collaborator on this repo). Please assign a reviewer manually."
+            exit 0
+          fi
+
+          comment "🤖 **Auto-reviewer:** requested review from @$SELECTED — $REASON."
+          log "auto-reviewer: success."
