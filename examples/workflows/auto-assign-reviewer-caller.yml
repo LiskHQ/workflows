@@ -1,0 +1,38 @@
+# Example: Call the reusable auto-assign-reviewer workflow
+# Copy this file to your repo's .github/workflows/ directory.
+#
+# Update `domain:` to match the repo:
+#   lisk-backend   → backend
+#   lisk-web       → web
+#   lisk-infra     → infra
+#   lisk-mobile    → mobile
+#   lisk-contracts → contracts
+#
+# Triggers:
+#   PR opened, ready_for_review (draft → ready transition).
+#   Drafts are skipped automatically.
+#
+# Uses pull_request_target so it works on PRs from forks. The reusable
+# workflow only calls the GitHub API and never checks out PR code, so this
+# is safe.
+
+name: Auto-assign Reviewer
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+
+# Prevent duplicate runs for the same PR.
+concurrency:
+  group: auto-assign-reviewer-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  assign:
+    if: github.event.pull_request.draft == false
+    uses: LiskHQ/workflows/.github/workflows/auto-assign-reviewer.yml@main
+    with:
+      domain: backend  # ← change per repo
+    permissions:
+      pull-requests: write
+      contents: read
