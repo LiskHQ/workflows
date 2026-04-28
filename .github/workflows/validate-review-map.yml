@@ -111,14 +111,19 @@ jobs:
           fi
           echo "structure: OK"
 
-      - name: Verify all logins are LiskHQ org members
+      - name: Verify all logins are real GitHub users
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAP_JSON: /tmp/review-map.json
         run: |
           set -euo pipefail
 
-          # Collect every github_login referenced anywhere in the map
+          # Catches typos (non-existent logins). Does NOT enforce org
+          # membership — that requires a PAT with read:org scope, which
+          # GITHUB_TOKEN does not have. If a non-collaborator is listed,
+          # the auto-assign workflow will soft-fail with a PR comment at
+          # request time rather than blocking the map PR here.
+
           LOGINS=$(
             jq -r '
               [
@@ -129,27 +134,26 @@ jobs:
               ] | unique | .[]' "$MAP_JSON"
           )
 
-          # Bots and known external collaborators are exempt from org-member check.
+          # Bots and external collaborators in bot_authors are exempt — they
+          # may not have stable user pages or may be auto-generated.
           EXEMPT=$(jq -r '.bot_authors[]' "$MAP_JSON" | sort -u)
 
           fail=0
           while read -r login; do
             [ -z "$login" ] && continue
-            # Skip bot logins (anything ending in [bot]) and exempt list
             case "$login" in
               *"[bot]") continue ;;
             esac
             if printf '%s\n' "$EXEMPT" | grep -Fxq "$login"; then
               continue
             fi
-            if ! gh api "/orgs/LiskHQ/members/$login" --silent 2>/dev/null; then
-              echo "::error file=review-map.yml::login '$login' is not a public member of LiskHQ org (or token cannot see them)"
+            if ! gh api "/users/$login" --silent 2>/dev/null; then
+              echo "::error file=review-map.yml::login '$login' is not a real GitHub user (typo?)"
               fail=1
             fi
           done <<<"$LOGINS"
 
           if [ "$fail" -ne 0 ]; then
-            echo "::warning::Some logins could not be verified. If these are private org members, the default GITHUB_TOKEN may not see them — verify manually."
             exit 1
           fi
           echo "logins: OK"
