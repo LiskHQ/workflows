@@ -28,16 +28,32 @@ Given PR author `A`, repo domain `D`, author squad `S`:
 
 1. **Own-squad specialists.** If `S.specialists[D]` minus `A` is non-empty,
    pick `eligible[PR# % len]`.
-2. **Squad-wide fallback.** If `D ∈ S.fallback_to_squad_members_for` and step 1
-   produced nothing, pick from `S.members` minus `A`.
-3. **Sibling cascade.** Walk `sibling_fallback_order`. For each sibling squad
+2. **Own-squad equivalent domain.** For each `E` in `domain_equivalence[D]`,
+   if `S.specialists[E]` minus `A` is non-empty, pick `eligible[PR# % len]`.
+   Keeps the review inside the squad when web/mobile are interchangeable.
+3. **Squad-wide fallback.** If `D ∈ S.fallback_to_squad_members_for` and prior
+   steps produced nothing, pick from `S.members` minus `A`.
+4. **Sibling cascade.** Walk `sibling_fallback_order`. For each sibling squad
    `T` (`T ≠ S`), if `T.specialists[D]` minus `A` is non-empty, pick
-   `eligible[PR# % len]`.
-4. **Soft-fail.** Post a PR comment asking for manual assignment. Workflow
+   `eligible[PR# % len]`. Equivalence is **not** applied cross-squad.
+5. **Soft-fail.** Post a PR comment asking for manual assignment. Workflow
    succeeds (never blocks merge).
 
 `PR# % N` gives stateless deterministic round-robin. Author exclusion happens
 before modulo, so distribution stays balanced.
+
+### Domain equivalence
+
+```yaml
+domain_equivalence:
+  web: [mobile]
+  mobile: [web]
+```
+
+Web and mobile are treated as interchangeable skills *within* a squad — when
+an org engineer opens a mobile PR, org's web specialists handle it (instead
+of cascading to money). Equivalence is intra-squad only; cross-squad
+cascade always uses the actual domain.
 
 ## Squad / domain matrix
 

@@ -6,9 +6,10 @@ name: Auto-assign Reviewer (Reusable)
 #
 # Cascade (see docs/auto-reviewer.md):
 #   1. own-squad specialists for the domain (round-robin via PR# % N)
-#   2. for fallback_to_squad_members_for domains: any other squad member
-#   3. sibling squads in sibling_fallback_order
-#   4. soft-fail with PR comment
+#   2. own-squad specialists for an equivalent domain (web ↔ mobile)
+#   3. for fallback_to_squad_members_for domains: any other squad member
+#   4. sibling squads in sibling_fallback_order (actual domain only)
+#   5. soft-fail with PR comment
 
 on:
   workflow_call:
@@ -134,7 +135,28 @@ jobs:
             fi
           fi
 
-          # Step 2: squad-wide fallback for designated domains (e.g., infra)
+          # Step 2: own-squad equivalent-domain specialists
+          # E.g., for org's mobile PR, try org's web specialists since web ↔
+          # mobile are equivalent. Keeps the review inside the squad.
+          if [ -z "$SELECTED" ]; then
+            EQUIV_DOMAINS=$(jq -r --arg d "$DOMAIN" '
+              .domain_equivalence[$d] // [] | .[]' "$MAP_JSON")
+            for EQ in $EQUIV_DOMAINS; do
+              EQ_LIST=$(jq -r --arg s "$AUTHOR_SQUAD" --arg d "$EQ" '
+                .squads[$s].specialists[$d] // [] | .[]' "$MAP_JSON")
+              [ -z "$EQ_LIST" ] && continue
+              CAND=$(printf '%s\n' "$EQ_LIST" | grep -v -Fx "$PR_AUTHOR" || true)
+              if [ -n "$CAND" ]; then
+                COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
+                IDX=$(( PR_NUMBER % COUNT ))
+                SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
+                REASON="own-squad ($AUTHOR_SQUAD) $EQ specialist (equivalent to $DOMAIN)"
+                break
+              fi
+            done
+          fi
+
+          # Step 3: squad-wide fallback for designated domains (e.g., infra)
           if [ -z "$SELECTED" ]; then
             FB=$(jq -r --arg s "$AUTHOR_SQUAD" '
               .squads[$s].fallback_to_squad_members_for // [] | .[]' "$MAP_JSON")
@@ -150,7 +172,7 @@ jobs:
             fi
           fi
 
-          # Step 3: sibling cascade
+          # Step 4: sibling cascade
           if [ -z "$SELECTED" ]; then
             ORDER=$(jq -r '.sibling_fallback_order[]' "$MAP_JSON")
             for SIB in $ORDER; do
@@ -173,7 +195,7 @@ jobs:
             done
           fi
 
-          # Step 4: soft-fail
+          # Step 5: soft-fail
           if [ -z "$SELECTED" ]; then
             warn "auto-reviewer: no eligible reviewer found for $PR_AUTHOR / $DOMAIN."
             comment "🤖 **Auto-reviewer:** could not find an eligible reviewer for domain \`$DOMAIN\` from author \`$PR_AUTHOR\` (squad \`$AUTHOR_SQUAD\`). Please assign a reviewer manually."

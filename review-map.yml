@@ -26,7 +26,16 @@ bot_authors:
   - copilot-pull-request-reviewer[bot]
   - bmijac  # external contributor on lisk-web
 
-# When own-squad has no eligible specialist, walk siblings in this order.
+# Domain equivalence — within a squad, specialists for an equivalent domain
+# may review when no specialist exists for the requested domain. This stays
+# the review inside the squad. Equivalence does NOT apply to sibling cascade
+# (cross-squad routing always uses the actual domain).
+domain_equivalence:
+  web: [mobile]
+  mobile: [web]
+
+# When own-squad has no eligible specialist (and no equivalent), walk
+# siblings in this order.
 sibling_fallback_order:
   - money
   - org

@@ -95,6 +95,19 @@ jobs:
             esac
           done < <(jq -r '.squads | to_entries[] | .key as $s | (.value.fallback_to_squad_members_for // [])[] | [$s, .] | @tsv' "$MAP_JSON")
 
+          # domain_equivalence keys and values must all be valid domains
+          while IFS=$'\t' read -r k v; do
+            [ -z "$k" ] && continue
+            for d in "$k" "$v"; do
+              case " $ALLOWED_DOMAINS " in
+                *" $d "*) ;;
+                *) err "domain_equivalence references unknown domain: '$d'" ;;
+              esac
+            done
+          done < <(jq -r '
+            (.domain_equivalence // {}) | to_entries[]
+            | .key as $k | .value[] | [$k, .] | @tsv' "$MAP_JSON")
+
           # Every specialist login should also appear in the squad's members list
           while IFS=$'\t' read -r squad login; do
             [ -z "$login" ] && continue
