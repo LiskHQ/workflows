@@ -1,23 +1,26 @@
 # Example: Call the reusable PR review workflow
 # Copy this file to your repo's .github/workflows/ directory
 #
-# Triggers:
-#   Every push to a PR (opened, synchronize, reopened, ready_for_review)
-#   /review          - manual re-run (also lets you pick a model)
-#   /review opus     - manual re-run with opus
-#   /review haiku    - manual re-run with haiku
-#   needs-review     - label trigger (also re-runs)
+# Triggers (on-demand only — does NOT auto-run on every push):
+#   /review          - comment to run review (default sonnet)
+#   /review opus     - comment to run with opus
+#   /review haiku    - comment to run with haiku
+#   needs-review     - apply label to run review
+#
+# Rationale: auto-running on every push (synchronize) burns Anthropic
+# tokens proportional to PR push count. On-demand triggers keep cost
+# bounded to actual review requests.
 
 name: Claude PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [labeled]
   issue_comment:
     types: [created]
 
-# Prevent multiple runs for the same PR. cancel-in-progress means a fresh push
-# cancels the in-flight review and starts a new one — avoids reviewing stale SHAs.
+# Prevent overlapping runs for the same PR (e.g. label + comment in quick
+# succession). cancel-in-progress drops the older run.
 concurrency:
   group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
@@ -25,9 +28,8 @@ concurrency:
 jobs:
   check-trigger:
     # Run when any of:
-    #   1. PR push/open/ready (non-draft, non-bot)
-    #   2. PR labeled with `needs-review`
-    #   3. PR comment contains `/review`
+    #   1. PR labeled with `needs-review`
+    #   2. PR comment contains `/review`
     # Always skip bot-authored PRs and bot comments.
     if: |
       github.actor != 'dependabot[bot]' &&
@@ -36,12 +38,8 @@ jobs:
       github.actor != 'github-actions[bot]' &&
       (
         (github.event_name == 'pull_request' &&
-         github.event.pull_request.draft == false &&
-         (github.event.action == 'opened' ||
-          github.event.action == 'synchronize' ||
-          github.event.action == 'reopened' ||
-          github.event.action == 'ready_for_review' ||
-          (github.event.action == 'labeled' && github.event.label.name == 'needs-review'))) ||
+         github.event.action == 'labeled' &&
+         github.event.label.name == 'needs-review') ||
         (github.event_name == 'issue_comment' &&
          github.event.issue.pull_request &&
          contains(github.event.comment.body, '/review'))
