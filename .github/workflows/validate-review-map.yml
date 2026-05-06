@@ -7,6 +7,7 @@ name: Validate review-map.yml
 #   - Every domain key in specialists is one of: backend|web|infra|mobile|contracts
 #   - Every squad name in sibling_fallback_order exists under .squads
 #   - Each squad's TL is also in members (when not null)
+#   - Every bot_pr_owners key matches an entry in enabled_repos
 
 on:
   pull_request:
@@ -86,6 +87,14 @@ jobs:
             fi
           done < <(jq -r '.squads | to_entries[] | [.key, (.value.tl // "")] | @tsv' "$MAP_JSON")
 
+          # bot_pr_owners keys must be in enabled_repos
+          while IFS=$'\t' read -r repo owner; do
+            [ -z "$repo" ] && continue
+            if ! jq -r '.enabled_repos[]' "$MAP_JSON" | grep -Fxq "$repo"; then
+              err "bot_pr_owners key '$repo' is not in enabled_repos"
+            fi
+          done < <(jq -r '.bot_pr_owners // {} | to_entries[] | [.key, .value] | @tsv' "$MAP_JSON")
+
           # fallback_to_squad_members_for entries must be valid domains
           while IFS=$'\t' read -r squad domain; do
             [ -z "$domain" ] && continue
@@ -141,6 +150,7 @@ jobs:
             jq -r '
               [
                 (.bot_authors // [])[],
+                (.bot_pr_owners // {} | to_entries[].value),
                 (.squads[].members // [])[],
                 (.squads[].tl // empty),
                 (.squads[].specialists // {} | to_entries[].value[])
