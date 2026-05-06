@@ -24,7 +24,13 @@ specialist." This workflow does that with one shared map.
 
 ## Cascade
 
-Given PR author `A`, repo domain `D`, author squad `S`:
+**Bot / external authors short-circuit before the cascade.** If the PR author
+is in `bot_authors`, the workflow requests the repo's `bot_pr_owners[<repo>]`
+(if mapped) and exits. Bots have no squad and don't need round-robin
+distribution; a single per-repo owner is enough. If no owner is mapped for
+the repo, the workflow exits 0 silently.
+
+Given a human PR author `A`, repo domain `D`, author squad `S`:
 
 1. **Own-squad specialists.** If `S.specialists[D]` minus `A` is non-empty,
    pick `eligible[PR# % len]`.
@@ -84,9 +90,32 @@ siblings.
 
 - **All assignment off:** set `enabled: false` in `review-map.yml`.
 - **One repo off:** remove it from `enabled_repos`.
-- **Skip a specific author:** add login to `bot_authors`.
+- **Bypass squad cascade for an author:** add login to `bot_authors`. They get
+  routed to `bot_pr_owners[<repo>]` if mapped, otherwise skipped.
+- **Stop bot routing in a repo:** remove the repo from `bot_pr_owners` (bot
+  PRs in that repo will then be skipped).
 
 All take effect on the next PR open with no other action.
+
+## Bot / external author routing
+
+`bot_pr_owners` maps repo name → single GitHub login. Designed for PRs where
+squad-based routing doesn't apply: dependabot bumps, renovate bumps, claude
+PR commits, copilot review bot, plus listed external contributors.
+
+Current mapping:
+
+| Repo            | Owner       |
+|-----------------|-------------|
+| `lisk-backend`  | `ishantiw`  |
+| `lisk-web`      | `mmarinovic`|
+| `lisk-mobile`   | `5heri`     |
+| `lisk-infra`    | `Nazgolze`  |
+| `lisk-contracts`| `matjazv`   |
+
+The owner is requested verbatim — no round-robin, no domain check, no
+fallback. If they're unavailable, the comment trail surfaces who the API
+rejected so a human can re-assign.
 
 ## What does and doesn't fail the workflow
 

@@ -96,9 +96,36 @@ jobs:
             exit 0
           fi
 
-          # ── Bot-author skip ──────────────────────────────────────────────
+          # ── Already-requested reviewers (idempotency) ────────────────────
+          # Fetched up-front so both the bot-author path and the squad
+          # cascade can short-circuit if the chosen reviewer is already
+          # requested.
+          EXISTING=$(gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" --jq '.users[].login' 2>/dev/null || true)
+
+          # ── Bot-author / external-author routing ─────────────────────────
+          # Bots and listed external contributors bypass the squad cascade
+          # because they have no squad. Route them to the repo's bot_pr_owner
+          # if one is mapped; otherwise skip.
           if jq -r '.bot_authors[]' "$MAP_JSON" | grep -Fxq "$PR_AUTHOR"; then
-            log "auto-reviewer: skipping bot/external author '$PR_AUTHOR'."
+            BOT_OWNER=$(jq -r --arg r "$REPO_NAME" '.bot_pr_owners[$r] // ""' "$MAP_JSON")
+            if [ -z "$BOT_OWNER" ] || [ "$BOT_OWNER" = "null" ]; then
+              log "auto-reviewer: bot/external author '$PR_AUTHOR' on $REPO_NAME has no bot_pr_owners mapping. Skipping."
+              exit 0
+            fi
+            if printf '%s\n' "$EXISTING" | grep -Fxq "$BOT_OWNER"; then
+              log "auto-reviewer: $BOT_OWNER already requested on PR #$PR_NUMBER (bot path). Skipping."
+              exit 0
+            fi
+            log "auto-reviewer: routing bot/external author '$PR_AUTHOR' → $BOT_OWNER (repo owner for $REPO_NAME)"
+            if ! gh api -X POST "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" \
+                  -f "reviewers[]=$BOT_OWNER" >/dev/null 2>err.log; then
+              ERR=$(cat err.log || true)
+              warn "auto-reviewer: failed to request $BOT_OWNER for bot PR: $ERR"
+              comment "🤖 **Auto-reviewer:** tried to request review from \`@$BOT_OWNER\` for bot/external author \`$PR_AUTHOR\` but the API rejected it (likely not a collaborator on this repo). Please assign a reviewer manually."
+              exit 0
+            fi
+            comment "🤖 **Auto-reviewer:** requested review from @$BOT_OWNER — repo owner for bot/external author \`$PR_AUTHOR\`."
+            log "auto-reviewer: bot-path success."
             exit 0
           fi
 
@@ -114,9 +141,6 @@ jobs:
           fi
 
           log "auto-reviewer: author=$PR_AUTHOR squad=$AUTHOR_SQUAD domain=$DOMAIN repo=$REPO_NAME pr=$PR_NUMBER"
-
-          # ── Already-requested reviewers (idempotency) ────────────────────
-          EXISTING=$(gh api "repos/$REPO/pulls/$PR_NUMBER/requested_reviewers" --jq '.users[].login' 2>/dev/null || true)
 
           # ── Cascade resolution ───────────────────────────────────────────
           SELECTED=""

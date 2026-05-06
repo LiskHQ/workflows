@@ -17,7 +17,8 @@ enabled_repos:
   - lisk-mobile
   - lisk-contracts
 
-# Authors to skip entirely (no assignment, exit 0).
+# Authors that bypass the squad cascade. They get routed to the repo's
+# bot_pr_owner (see below) if one is set, otherwise the workflow exits 0.
 bot_authors:
   - dependabot[bot]
   - renovate[bot]
@@ -25,6 +26,17 @@ bot_authors:
   - claude[bot]
   - copilot-pull-request-reviewer[bot]
   - bmijac  # external contributor on lisk-web
+
+# Per-repo owner for bot-authored / external-author PRs. Keyed by repo
+# name (must match an entry in enabled_repos). When a PR author is in
+# bot_authors, the mapped owner is requested instead of running the
+# squad cascade. If a repo has no entry here, bot PRs are skipped.
+bot_pr_owners:
+  lisk-backend: ishantiw
+  lisk-web: mmarinovic
+  lisk-mobile: 5heri
+  lisk-infra: Nazgolze
+  lisk-contracts: matjazv
 
 # Domain equivalence — within a squad, specialists for an equivalent domain
 # may review when no specialist exists for the requested domain. This stays
