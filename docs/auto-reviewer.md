@@ -37,8 +37,11 @@ Given a human PR author `A`, repo domain `D`, author squad `S`:
 2. **Own-squad equivalent domain.** For each `E` in `domain_equivalence[D]`,
    if `S.specialists[E]` minus `A` is non-empty, pick `eligible[PR# % len]`.
    Keeps the review inside the squad when web/mobile are interchangeable.
-3. **Squad-wide fallback.** If `D ∈ S.fallback_to_squad_members_for` and prior
-   steps produced nothing, pick from `S.members` minus `A`.
+3. **Own-squad team round-robin.** If prior steps produced nothing, pick from
+   `S.members` minus `A`. In-team review is the priority — only after every
+   teammate is exhausted do we cross squads. Useful when the author is the
+   sole specialist for the domain (e.g., matjazv on a backend or contracts
+   PR in `org`) so the PR still gets reviewed by their own team.
 4. **Sibling cascade.** Walk `sibling_fallback_order`. For each sibling squad
    `T` (`T ≠ S`), if `T.specialists[D]` minus `A` is non-empty, pick
    `eligible[PR# % len]`. Equivalence is **not** applied cross-squad.
@@ -70,11 +73,8 @@ cascade always uses the actual domain.
 | org       | matjazv                | mmarinovic, mvuco00, ikem-legend, mislavtomic | —          | —                       | matjazv   |
 | global    | —                      | —                                   | —          | —                       | ricott1   |
 
-`—` = no own-squad specialist; cascades to siblings.
-
-`platform.fallback_to_squad_members_for: [infra]` — when Nazgolze opens an
-infra PR, fall back to any other platform member instead of jumping to
-siblings.
+`—` = no own-squad specialist; falls back to any other team member, then
+cascades to siblings if the team has no one else available.
 
 `sibling_fallback_order: [money, org, platform, global]`.
 

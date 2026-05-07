@@ -95,15 +95,6 @@ jobs:
             fi
           done < <(jq -r '.bot_pr_owners // {} | to_entries[] | [.key, .value] | @tsv' "$MAP_JSON")
 
-          # fallback_to_squad_members_for entries must be valid domains
-          while IFS=$'\t' read -r squad domain; do
-            [ -z "$domain" ] && continue
-            case " $ALLOWED_DOMAINS " in
-              *" $domain "*) ;;
-              *) err "squad '$squad' fallback_to_squad_members_for contains unknown domain: '$domain'" ;;
-            esac
-          done < <(jq -r '.squads | to_entries[] | .key as $s | (.value.fallback_to_squad_members_for // [])[] | [$s, .] | @tsv' "$MAP_JSON")
-
           # domain_equivalence keys and values must all be valid domains
           while IFS=$'\t' read -r k v; do
             [ -z "$k" ] && continue
