@@ -7,7 +7,7 @@ name: Auto-assign Reviewer (Reusable)
 # Cascade (see docs/auto-reviewer.md):
 #   1. own-squad specialists for the domain (round-robin via PR# % N)
 #   2. own-squad specialists for an equivalent domain (web ↔ mobile)
-#   3. for fallback_to_squad_members_for domains: any other squad member
+#   3. any other own-squad member (round-robin) — keeps review in-team
 #   4. sibling squads in sibling_fallback_order (actual domain only)
 #   5. soft-fail with PR comment
 
@@ -180,19 +180,15 @@ jobs:
             done
           fi
 
-          # Step 3: squad-wide fallback for designated domains (e.g., infra)
+          # Step 3: squad-wide fallback — any other team member (in-team priority)
           if [ -z "$SELECTED" ]; then
-            FB=$(jq -r --arg s "$AUTHOR_SQUAD" '
-              .squads[$s].fallback_to_squad_members_for // [] | .[]' "$MAP_JSON")
-            if printf '%s\n' "$FB" | grep -Fxq "$DOMAIN"; then
-              SQUAD_MEMBERS=$(jq -r --arg s "$AUTHOR_SQUAD" '.squads[$s].members[]' "$MAP_JSON")
-              CAND=$(printf '%s\n' "$SQUAD_MEMBERS" | grep -v -Fx "$PR_AUTHOR" || true)
-              if [ -n "$CAND" ]; then
-                COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
-                IDX=$(( PR_NUMBER % COUNT ))
-                SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
-                REASON="own-squad ($AUTHOR_SQUAD) member fallback for $DOMAIN"
-              fi
+            SQUAD_MEMBERS=$(jq -r --arg s "$AUTHOR_SQUAD" '.squads[$s].members[]' "$MAP_JSON")
+            CAND=$(printf '%s\n' "$SQUAD_MEMBERS" | grep -v -Fx "$PR_AUTHOR" || true)
+            if [ -n "$CAND" ]; then
+              COUNT=$(printf '%s\n' "$CAND" | wc -l | tr -d ' ')
+              IDX=$(( PR_NUMBER % COUNT ))
+              SELECTED=$(printf '%s\n' "$CAND" | sed -n "$((IDX + 1))p")
+              REASON="own-squad ($AUTHOR_SQUAD) team round-robin (no $DOMAIN specialist available)"
             fi
           fi
 

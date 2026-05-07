@@ -46,8 +46,8 @@ domain_equivalence:
   web: [mobile]
   mobile: [web]
 
-# When own-squad has no eligible specialist (and no equivalent), walk
-# siblings in this order.
+# When own-squad has no eligible reviewer at all (no specialist, no equivalent
+# specialist, no other squad member), walk siblings in this order.
 sibling_fallback_order:
   - money
   - org
@@ -64,9 +64,6 @@ squads:
     specialists:
       backend: [sameersubudhi, ishantiw]
       infra:   [Nazgolze]
-    # Domains where, if no specialist is eligible, the cascade falls back to
-    # any other squad member (instead of jumping straight to siblings).
-    fallback_to_squad_members_for: [infra]
 
   money:
     tl: 5heri
